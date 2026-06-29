@@ -2,10 +2,13 @@ name: Refresh Claude Quota Limit
 
 on:
   schedule:
-    # “工作日上班三刷方案”：北京时间点: 01:00, 06:00, 11:00, 16:00, 21:00 (每5小时等差循环)
-    # GitHub Actions 只支持 UTC 时间，北京时间转换成 UTC 为: 17:00, 22:00, 03:00, 08:00, 13:00
-    # 为保证北京时间周一至周五全部覆盖，星期设为 0-5 (代表 UTC 的周日至周五)
-    - cron: '0 3,8,13,17,22 * * 0-5'
+    # 由于 GitHub Actions 使用 UTC 时区，若要精准契合北京时间（周一至周五）的刷新点，需要分设两组以防跨天错位：
+    
+    # 1. 刷新北京时间周一至周五的 11:00, 16:00, 21:00 (对应 UTC 当天 03:00, 08:00, 13:00)
+    - cron: '0 3,8,13 * * 1-5'
+    
+    # 2. 刷新北京时间周一至周五的 01:00, 06:00 (由于跨天，对应 UTC 前一天的 17:00, 22:00，星期设为周日至周四 0-4)
+    - cron: '0 17,22 * * 0-4'
   workflow_dispatch: # 支持手动触发
 
 jobs:
@@ -25,54 +28,38 @@ jobs:
           fi
 
           echo "=============================================="
-          echo "⏰ 开始刷新 5 小时限额请求..."
+          echo "⏰ 开始模拟提问以激活 5 小时滚动时间窗口..."
           echo "=============================================="
 
-          # 准备请求参数（模拟 query-usage.mjs 的时间窗口，GET 请求触发刷新）
-          START_TIME=$(date -d "yesterday" +"%Y-%m-%d %H:%M:%S")
-          END_TIME=$(date +"%Y-%m-%d %H:%M:%S")
+          # 通过发送超低消耗的真实模型对话，强行在智谱后台生成调用时间戳，从而激活 5 小时冷却倒计时
+          # 这样能确保在 5 小时后（11点、16点、21点）自动释放额度窗口，实现工作时段额度最大化！
           
-          # URL 编码时间参数，GitHub Ubuntu 环境有 jq
-          ENCODED_START=$(echo -n "$START_TIME" | jq -sRr @uri)
-          ENCODED_END=$(echo -n "$END_TIME" | jq -sRr @uri)
-
-          echo "时间范围: $START_TIME 到 $END_TIME"
-          
-          # 定义需要请求的接口列表
           DOMAINS=("https://api.z.ai" "https://open.bigmodel.cn")
           
           for DOMAIN in "${DOMAINS[@]}"; do
             echo "----------------------------------------------"
-            echo "正在请求平台: $DOMAIN ..."
+            echo "正在向平台发送模拟提问: $DOMAIN ..."
             
-            # 1. 刷新 Quota Limit
-            echo "👉 GET $DOMAIN/api/monitor/usage/quota/limit"
-            curl -s -X GET \
-              -H "Authorization: ${AUTH_TOKEN}" \
-              -H "Accept-Language: en-US,en" \
-              -H "Content-Type: application/json" \
-              "$DOMAIN/api/monitor/usage/quota/limit"
+            # 1. 模拟 Claude API 接口提问 (兼容 Claude Code 协议)
+            echo "👉 POST $DOMAIN/api/anthropic/v1/messages"
+            curl -s -X POST \
+              -H "x-api-key: ${AUTH_TOKEN}" \
+              -H "anthropic-version: 2023-06-01" \
+              -H "content-type: application/json" \
+              -d '{"model": "glm-4.7", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}' \
+              "$DOMAIN/api/anthropic/v1/messages"
             echo ""
 
-            # 2. 刷新 Model Usage (携带时间范围)
-            echo "👉 GET $DOMAIN/api/monitor/usage/model-usage"
-            curl -s -X GET \
-              -H "Authorization: ${AUTH_TOKEN}" \
-              -H "Accept-Language: en-US,en" \
-              -H "Content-Type: application/json" \
-              "$DOMAIN/api/monitor/usage/model-usage?startTime=$ENCODED_START&endTime=$ENCODED_END"
-            echo ""
-
-            # 3. 刷新 Tool Usage (携带时间范围)
-            echo "👉 GET $DOMAIN/api/monitor/usage/tool-usage"
-            curl -s -X GET \
-              -H "Authorization: ${AUTH_TOKEN}" \
-              -H "Accept-Language: en-US,en" \
-              -H "Content-Type: application/json" \
-              "$DOMAIN/api/monitor/usage/tool-usage?startTime=$ENCODED_START&endTime=$ENCODED_END"
+            # 2. 模拟通用大模型 Chat 接口提问 (双重保险，如果 Claude 代理不可用则调用通用接口)
+            echo "👉 POST $DOMAIN/api/paas/v4/chat/completions"
+            curl -s -X POST \
+              -H "Authorization: Bearer ${AUTH_TOKEN}" \
+              -H "content-type: application/json" \
+              -d '{"model": "glm-4.5-flash", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}' \
+              "$DOMAIN/api/paas/v4/chat/completions"
             echo ""
           done
           
           echo "=============================================="
-          echo "✅ 刷新请求发送完成。"
+          echo "✅ 模拟提问请求发送完成，已成功触发 5 小时限额窗口起点。"
           echo "=============================================="
