@@ -34,31 +34,22 @@ jobs:
           # 通过发送超低消耗的真实模型对话，强行在智谱后台生成调用时间戳，从而激活 5 小时冷却倒计时
           # 这样能确保在 5 小时后（11点、16点、21点）自动释放额度窗口，实现工作时段额度最大化！
           
-          DOMAINS=("https://api.z.ai" "https://open.bigmodel.cn")
+          # 仅请求国内大模型官网，且只调用与 Claude Code 完全对齐的 messages 接口
+          # 这样每次定时任务仅产生 1 次调用消耗（只扣除 1 次提问数，且仅消耗 6-7 个 token），确保次数与额度损耗最小化
+          DOMAIN="https://open.bigmodel.cn"
           
-          for DOMAIN in "${DOMAINS[@]}"; do
-            echo "----------------------------------------------"
-            echo "正在向平台发送模拟提问: $DOMAIN ..."
-            
-            # 1. 模拟 Claude API 接口提问 (兼容 Claude Code 协议)
-            echo "👉 POST $DOMAIN/api/anthropic/v1/messages"
-            curl -s -X POST \
-              -H "x-api-key: ${AUTH_TOKEN}" \
-              -H "anthropic-version: 2023-06-01" \
-              -H "content-type: application/json" \
-              -d '{"model": "glm-4.7", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}' \
-              "$DOMAIN/api/anthropic/v1/messages"
-            echo ""
-
-            # 2. 模拟通用大模型 Chat 接口提问 (双重保险，如果 Claude 代理不可用则调用通用接口)
-            echo "👉 POST $DOMAIN/api/paas/v4/chat/completions"
-            curl -s -X POST \
-              -H "Authorization: Bearer ${AUTH_TOKEN}" \
-              -H "content-type: application/json" \
-              -d '{"model": "glm-4.5-flash", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}' \
-              "$DOMAIN/api/paas/v4/chat/completions"
-            echo ""
-          done
+          echo "----------------------------------------------"
+          echo "正在向平台发送模拟提问: $DOMAIN ..."
+          
+          # 模拟 Claude API 接口提问 (兼容 Claude Code 协议)
+          echo "👉 POST $DOMAIN/api/anthropic/v1/messages"
+          curl -s -X POST \
+            -H "x-api-key: ${AUTH_TOKEN}" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            -d '{"model": "glm-4.7", "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}' \
+            "$DOMAIN/api/anthropic/v1/messages"
+          echo ""
           
           echo "=============================================="
           echo "✅ 模拟提问请求发送完成，已成功触发 5 小时限额窗口起点。"
