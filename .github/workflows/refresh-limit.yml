@@ -1,0 +1,78 @@
+name: Refresh Claude Quota Limit
+
+on:
+  schedule:
+    # “工作日上班三刷方案”：北京时间点: 01:00, 06:00, 11:00, 16:00, 21:00 (每5小时等差循环)
+    # GitHub Actions 只支持 UTC 时间，北京时间转换成 UTC 为: 17:00, 22:00, 03:00, 08:00, 13:00
+    # 为保证北京时间周一至周五全部覆盖，星期设为 0-5 (代表 UTC 的周日至周五)
+    - cron: '0 3,8,13,17,22 * * 0-5'
+  workflow_dispatch: # 支持手动触发
+
+jobs:
+  refresh-limit:
+    name: "Refresh Z.ai/Bigmodel Claude Limit"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Send Refresh Request to Z.ai & Zhipu"
+        env:
+          # GitHub Secrets 中的秘钥，优先读取 minimax api key
+          AUTH_TOKEN: "${{ secrets.WFG_MINIMAX_API_KEY || secrets.ZHIPU_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN }}"
+        run: |
+          if [ -z "${AUTH_TOKEN}" ]; then
+            echo "❌ Error: AUTH_TOKEN is empty. Please configure WFG_MINIMAX_API_KEY in GitHub Secrets."
+            exit 1
+          fi
+
+          echo "=============================================="
+          echo "⏰ 开始刷新 5 小时限额请求..."
+          echo "=============================================="
+
+          # 准备请求参数（模拟 query-usage.mjs 的时间窗口，GET 请求触发刷新）
+          START_TIME=$(date -d "yesterday" +"%Y-%m-%d %H:%M:%S")
+          END_TIME=$(date +"%Y-%m-%d %H:%M:%S")
+          
+          # URL 编码时间参数，GitHub Ubuntu 环境有 jq
+          ENCODED_START=$(echo -n "$START_TIME" | jq -sRr @uri)
+          ENCODED_END=$(echo -n "$END_TIME" | jq -sRr @uri)
+
+          echo "时间范围: $START_TIME 到 $END_TIME"
+          
+          # 定义需要请求的接口列表
+          DOMAINS=("https://api.z.ai" "https://open.bigmodel.cn")
+          
+          for DOMAIN in "${DOMAINS[@]}"; do
+            echo "----------------------------------------------"
+            echo "正在请求平台: $DOMAIN ..."
+            
+            # 1. 刷新 Quota Limit
+            echo "👉 GET $DOMAIN/api/monitor/usage/quota/limit"
+            curl -s -X GET \
+              -H "Authorization: ${AUTH_TOKEN}" \
+              -H "Accept-Language: en-US,en" \
+              -H "Content-Type: application/json" \
+              "$DOMAIN/api/monitor/usage/quota/limit"
+            echo ""
+
+            # 2. 刷新 Model Usage (携带时间范围)
+            echo "👉 GET $DOMAIN/api/monitor/usage/model-usage"
+            curl -s -X GET \
+              -H "Authorization: ${AUTH_TOKEN}" \
+              -H "Accept-Language: en-US,en" \
+              -H "Content-Type: application/json" \
+              "$DOMAIN/api/monitor/usage/model-usage?startTime=$ENCODED_START&endTime=$ENCODED_END"
+            echo ""
+
+            # 3. 刷新 Tool Usage (携带时间范围)
+            echo "👉 GET $DOMAIN/api/monitor/usage/tool-usage"
+            curl -s -X GET \
+              -H "Authorization: ${AUTH_TOKEN}" \
+              -H "Accept-Language: en-US,en" \
+              -H "Content-Type: application/json" \
+              "$DOMAIN/api/monitor/usage/tool-usage?startTime=$ENCODED_START&endTime=$ENCODED_END"
+            echo ""
+          done
+          
+          echo "=============================================="
+          echo "✅ 刷新请求发送完成。"
+          echo "=============================================="
