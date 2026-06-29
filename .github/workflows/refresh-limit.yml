@@ -16,11 +16,11 @@ jobs:
     steps:
       - name: "Send Refresh Request to Z.ai & Zhipu"
         env:
-          # GitHub Secrets 中的秘钥，优先读取 minimax api key
-          AUTH_TOKEN: "${{ secrets.WFG_MINIMAX_API_KEY || secrets.ZHIPU_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN }}"
+          # GitHub Secrets 中的秘钥，优先读取 ZHIPU_API_KEY
+          AUTH_TOKEN: "${{ secrets.ZHIPU_API_KEY || secrets.ZHIPU_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN }}"
         run: |
           if [ -z "${AUTH_TOKEN}" ]; then
-            echo "❌ Error: AUTH_TOKEN is empty. Please configure WFG_MINIMAX_API_KEY in GitHub Secrets."
+            echo "❌ Error: AUTH_TOKEN is empty. Please configure ZHIPU_API_KEY in GitHub Secrets."
             exit 1
           fi
 
